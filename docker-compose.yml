@@ -1,3 +1,20 @@
+x-app-common: &app-common
+  build:
+    context: .
+    dockerfile: Dockerfile
+  restart: unless-stopped
+  depends_on:
+    db:
+      condition: service_healthy
+  networks:
+    - lab_internal
+
+x-app-env: &app-env
+  DB_HOST: db
+  DB_NAME: ${MYSQL_DATABASE:-student_management_lab}
+  DB_USER: ${MYSQL_USER:-labapp_user}
+  DB_PASSWORD: ${MYSQL_PASSWORD:-lab_app_pw_change_me}
+
 services:
   db:
     image: mysql:8.0
@@ -15,7 +32,7 @@ services:
     networks:
       - lab_internal
     # Not published to the host: MySQL is reachable only from the app
-    # container, over the private "lab_internal" network.
+    # containers, over the private "lab_internal" network.
     expose:
       - "3306"
     healthcheck:
@@ -24,29 +41,33 @@ services:
       timeout: 5s
       retries: 10
 
-  app:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: sml_app
-    restart: unless-stopped
-    depends_on:
-      db:
-        condition: service_healthy
+  # Intentionally vulnerable build of the app (for practicing attacks)
+  app_vulnerable:
+    <<: *app-common
+    container_name: sml_app_vulnerable
     environment:
-      DB_HOST: db
-      DB_NAME: ${MYSQL_DATABASE:-student_management_lab}
-      DB_USER: ${MYSQL_USER:-labapp_user}
-      DB_PASSWORD: ${MYSQL_PASSWORD:-lab_app_pw_change_me}
-      APP_MODE: ${APP_MODE:-vulnerable}
+      <<: *app-env
+      APP_MODE: vulnerable
     volumes:
       - ./uploads:/var/www/html/uploads
       - ./secure_uploads:/var/www/html/secure_uploads
     ports:
-      # Bound to localhost only — never expose this lab beyond 127.0.0.1
-      - "${APP_BIND:-127.0.0.1}:${APP_PORT:-8080}:80"
-    networks:
-      - lab_internal
+      # Bound to all interfaces so other devices on the network can reach it.
+      # Only run this on a trusted, private network.
+      - "${APP_BIND:-0.0.0.0}:${APP_VULN_PORT:-8080}:80"
+
+  # Hardened build of the app (for comparing fixes)
+  app_secure:
+    <<: *app-common
+    container_name: sml_app_secure
+    environment:
+      <<: *app-env
+      APP_MODE: secure
+    volumes:
+      - ./uploads:/var/www/html/uploads
+      - ./secure_uploads:/var/www/html/secure_uploads
+    ports:
+      - "${APP_BIND:-0.0.0.0}:${APP_SECURE_PORT:-8081}:80"
 
 networks:
   lab_internal:
